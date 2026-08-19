@@ -15,52 +15,95 @@ Novo design da tela de `/login` (glassmorphism, marca TechFala + carrossel do Gr
 - **Contrato com o backend não muda**: o formulário continua mandando `POST /login` com `{ email, senha, lembrar }`, e trata a resposta do mesmo jeito (200 → redireciona pra `?proximo=` ou `/phone.html?painel=whatsapp`; não-200 → mostra "E-mail ou senha incorretos."). Nenhuma rota nova é necessária.
 - **"Esqueceu senha?"** continua sem funcionalidade real (`href="#"`) — igual à versão anterior, que também não tinha isso implementado. Não é uma regressão, é um gap que já existia.
 
-## Dois padrões de instância — confira qual é o seu antes de aplicar
+## 📖 Guia completo: atualizando a área de login de uma instância
 
-Auditei 5 instâncias (divane, alumax, esportevalle, patty, revistaurbanova) e existem **dois formatos diferentes** de `servidor.ts`. Abra o arquivo da instância e veja qual bate:
+Procedimento testado ponta a ponta — da troca do arquivo até o container no ar.
 
-### Padrão A — `PAGINA_LOGIN` (constante fixa)
-**Instâncias confirmadas:** divane, patty, revistaurbanova.
+### 1. Identificar o padrão da instância
 
-Procure por `const PAGINA_LOGIN = \`...\`` no `app/src/servidor.ts`. É uma troca direta de string.
+Abra `app/src/servidor.ts` e veja qual estrutura a rota `/login` usa. Existem **dois padrões** entre as instâncias auditadas (divane, alumax, esportevalle, patty, revistaurbanova):
 
-1. Copie a pasta `assets/login/` deste repo pra `app/public/assets/login/` da instância.
-2. Abra `app/src/servidor.ts` e localize a constante `PAGINA_LOGIN`.
-3. Substitua **todo o conteúdo entre os backticks** pelo conteúdo de `PAGINA_LOGIN.html` deste repo.
-4. Não mexa em mais nada nas rotas `GET /login` / `POST /login` — o contrato do form é o mesmo.
-5. `npm run build` (ou `npm run dev`) local pra conferir que não quebrou o TypeScript.
-6. Teste: login válido, senha errada, "lembrar" ligado/desligado.
-7. Commit + push pra `main` (dispara o deploy automático).
+- **Padrão A — constante fixa.** `const PAGINA_LOGIN = \`...\`` — usado por **divane, patty, revistaurbanova**. Troca direta de string.
+- **Padrão B — função parametrizada.** `function paginaLogin(): string { ... }` — usado por **alumax, esportevalle**. Monta a marca em runtime via `config.appDisplayName`/`config.appLogoUrl`/`config.appHeroUrl`, e pode ter prefixo de base path pro modo "hub" (`config.publicBasePath`).
 
-**Atenção pra revistaurbanova especificamente:** essa instância tinha `<title>` e favicon customizados ("Revista Urbanova — Acesso"). Se quiser manter isso, ajuste o `<title>` e o `<link rel="icon">` no topo do `PAGINA_LOGIN.html` antes de colar — o resto do visual (inclusive os logos dentro da página) já era genérico "TechFala" antes da troca, então não há branding específico sendo perdido aí.
+Se a instância for **Padrão B**, guarde estes dois detalhes pro passo 3 — não podem se perder na troca:
+- A guarda `if (config.painelAcessoBloqueado) return reply.code(403).send(...)` no início do `POST /login` (kill-switch de acesso, não relacionado ao design).
+- O prefixo `config.publicBasePath`, **se** essa instância rodar atrás do hub reverso (`ia.sanjaworks.com/{slug}/...`) — confira o valor no `config.ts` antes de decidir se precisa prefixar `/login` e `/phone.html` no `<script>` da página nova.
 
-### Padrão B — `paginaLogin()` (função parametrizada)
-**Instâncias confirmadas:** alumax, esportevalle.
+### 2. Copiar os assets estáticos
 
-Procure por `function paginaLogin(): string {` no `app/src/servidor.ts`. Essa função hoje monta a marca em runtime via `config.appDisplayName` / `config.appLogoUrl` / `config.appHeroUrl`, e pode ter um prefixo de base path pra modo "hub" (`config.publicBasePath`).
+O novo visual usa fontes locais, logotipos das marcas e a foto de fundo, sem depender de CDN externa.
 
-Como o novo design é uniforme (mesma marca TechFala em todas as instâncias), a parametrização de marca não é mais necessária — mas **duas coisas do handler não podem ser perdidas**:
+```bash
+cp -r /caminho/area-de-login/assets/login/* app/public/assets/login/
+```
 
-- A guarda `if (config.painelAcessoBloqueado) return reply.code(403).send(...)` no início do `POST /login` — é um kill-switch de acesso, não relacionado ao design.
-- O prefixo `config.publicBasePath`, **se** essa instância estiver rodando atrás do hub reverso (`ia.sanjaworks.com/{slug}/...`). Confira o valor de `publicBasePath` no `config.ts` da instância antes de decidir se precisa prefixar os caminhos `/login` e `/phone.html` no JavaScript da página nova.
+Arquivos incluídos:
+- Plano de fundo: `bg.jpg`
+- Marcas fixas: `techfala-mark.png` e `sanja-mark.png`
+- Fontes: `fonts/hanken.woff2` e `fonts/plex-mono-500.woff2`
+- Carrossel de marcas: `logos/` (`sanjaworks.png`, `techfala.png`, `abare.png`, `durole.png`, `exata.png`, `sanjafree.png`, `sanjasmart.png`)
 
-Passos:
+### 3. Atualizar o código do servidor (`app/src/servidor.ts`)
 
-1. Copie a pasta `assets/login/` pra `app/public/assets/login/`.
-2. Troque o corpo de `paginaLogin()` pra simplesmente `return \`...\`;` com o conteúdo de `PAGINA_LOGIN.html`, removendo as variáveis `marca`/`logo`/`hero` (não são mais usadas).
-3. Se `config.publicBasePath` não estiver vazio nessa instância, ajuste o `fetch('/login', ...)` e o redirect no `<script>` pra incluir esse prefixo.
-4. **Não** mexa no restante do `POST /login` — mantenha a guarda `painelAcessoBloqueado` intacta.
-5. Teste local, depois commit + push.
+- **Padrão A:** substitua todo o conteúdo entre os backticks da constante `PAGINA_LOGIN` pelo conteúdo de `PAGINA_LOGIN.html` deste repo.
+- **Padrão B:** troque o corpo de `paginaLogin()` pra `return \`...\`;` com o mesmo conteúdo, removendo as variáveis `marca`/`logo`/`hero` (não são mais usadas) — mas mantendo a guarda `painelAcessoBloqueado` e o prefixo de `publicBasePath` do passo 1 intactos no resto do handler.
 
-## Checklist de verificação (todas as instâncias)
+A rota `GET /login` não muda (nos dois padrões):
 
-- [ ] Login com credencial válida redireciona certo
-- [ ] Login com senha errada mostra "E-mail ou senha incorretos."
+```typescript
+app.get('/login', async (_req, reply) => {
+  reply.header('Cache-Control', 'no-store, must-revalidate');
+  return reply.type('text/html').send(PAGINA_LOGIN);
+});
+```
+
+- **Segurança no formulário:** o salvamento de senha em texto claro no `localStorage` (`mp_painel_login`) foi removido — a sessão é controlada exclusivamente pelo cookie seguro (`ttlSessao`).
+- **Contrato de autenticação:** o endpoint `POST /login` permanece idêntico, recebendo `{ email, senha, lembrar }`.
+
+### 4. Sincronizar o arquivo estático (`app/public/login.html`)
+
+Pra garantir compatibilidade caso o arquivo seja acessado diretamente:
+
+```bash
+cp /caminho/area-de-login/PAGINA_LOGIN.html app/public/login.html
+```
+
+### 5. Compilar o TypeScript
+
+Entre na pasta `app` da instância e rode o build, pra garantir que a tipagem e a sintaxe estão corretas:
+
+```bash
+cd app
+npm run build
+cd ..
+```
+
+### 6. Reiniciar apenas o container da instância (sem derrubar as outras)
+
+Como cada instância roda em um container Docker isolado, as alterações nos arquivos só entram em vigor quando a imagem do container é reconstruída. Na raiz da pasta da respectiva instância (onde fica o `docker-compose.yml`):
+
+```bash
+docker compose up -d --build
+```
+
+**🛡️ Por que este comando é seguro:**
+- **Escopo restrito**: o comando lê apenas o `docker-compose.yml` da pasta atual e atua unicamente no container daquela instância.
+- **Sem impacto em outras instâncias**: nenhuma outra ferramenta, container de cliente ou serviço compartilhado (Postgres, Redis, Qdrant, N8N, Traefik) é parado ou reiniciado.
+- **Zero downtime desnecessário**: o Docker compila a nova imagem em segundo plano e só substitui o container antigo no instante exato em que a nova imagem fica pronta.
+
+### 7. Checklist de validação
+
+Depois da reinicialização do container:
+
+- [ ] `GET /login` retorna status 200 OK com o layout glassmorphism
+- [ ] Assets estáticos: `GET /assets/login/bg.jpg`, fontes e logos retornam 200 OK (sem 404)
+- [ ] Credenciais inválidas exibem a mensagem de erro
+- [ ] Credenciais válidas fazem login e redirecionam pro painel
 - [ ] "Lembrar" mantém a sessão mais longa (cookie) — sem mais cache de senha no localStorage
-- [ ] Fontes, logos e a foto de fundo carregam (checar a aba Network, sem 404 em `/assets/login/...`)
+- [ ] Carrossel do Grupo Sanja Works animando, e os botões sociais/marcas do ecossistema abrindo os links certos em aba nova
 - [ ] Layout empilha certo em mobile (< 760px)
-- [ ] Ícones sociais (WhatsApp/TikTok/Instagram) e as marcas do ecossistema abrem os links certos em aba nova
 
 ## Próximas instâncias
 
-Antes de aplicar em uma instância nova, primeiro abra o `servidor.ts` dela e veja se usa o Padrão A ou o Padrão B (veja acima) — daí é só seguir o passo a passo correspondente. Se a instância divergir dos dois padrões conhecidos, vale conferir com calma antes de colar.
+Antes de aplicar em uma instância nova, primeiro abra o `servidor.ts` dela e veja se usa o Padrão A ou o Padrão B (passo 1 acima) — daí é só seguir o guia. Se a instância divergir dos dois padrões conhecidos, vale conferir com calma antes de colar.
